@@ -1,0 +1,14 @@
+node_modules/
+
+# Generated match logs and series results.
+data/
+logs/
+results/
+*.jsonl
+
+# Local runtime artifacts and agent metadata.
+.pairbuildr/
+*.log
+*.pid
+tmp/
+.tmp/

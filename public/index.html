@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Liar's Dice | Spectator</title>
+  <link rel="stylesheet" href="/spectator.css">
+</head>
+<body>
+  <main class="shell" id="app">
+    <header class="masthead">
+      <div><p class="eyebrow">LIVE TABLE</p><h1>Liar's Dice</h1></div>
+      <div class="connection" id="connection">Connecting</div>
+    </header>
+    <section class="scoreboard" aria-label="Match status">
+      <div><span class="label">ROUND</span><strong id="round">--</strong></div>
+      <div><span class="label">DICE IN PLAY</span><strong id="total-dice">--</strong></div>
+      <div><span class="label">TURN</span><strong id="turn">--</strong></div>
+    </section>
+    <section class="cups" id="cups" aria-label="Player cups"></section>
+    <section class="board-grid">
+      <article class="panel ladder-panel"><div class="panel-head"><h2>Bid ladder</h2><span id="current-bid">No bid</span></div><div id="ladder" class="ladder"></div></article>
+      <article class="panel reveal-panel"><div class="panel-head"><h2>Challenge</h2><span id="reveal-state">Awaiting reveal</span></div><div id="reveal" class="reveal empty">The table is still bidding.</div></article>
+      <article class="panel talk-panel"><div class="panel-head"><h2>Table talk</h2></div><div id="talk" class="talk empty">Quiet table.</div></article>
+      <article class="panel reasoning-panel" id="reasoning-panel"><div class="panel-head"><h2>Reasoning</h2><span>optional</span></div><div id="reasoning" class="reasoning empty">Reasoning is hidden.</div></article>
+    </section>
+  </main>
+  <script type="module" src="/spectator.js"></script>
+</body>
+</html>

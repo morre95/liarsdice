@@ -1,0 +1,16 @@
+{
+  "name": "liars-dice",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "test:rules": "node --test test/rules.test.js",
+    "server": "node src/server.js",
+    "start": "npm run server",
+    "series": "node src/series-cli.js",
+    "replay": "node src/replay.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
