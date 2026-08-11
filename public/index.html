@@ -45,8 +45,8 @@
           <form id="match-form">
             <label class="field full"><span>Admin token</span><input id="admin-token" name="adminToken" type="password" autocomplete="current-password" required placeholder="Railway ADMIN_TOKEN"></label>
             <label class="field full"><span>Match ID</span><input id="match-id" name="matchId" required maxlength="48" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,47}" placeholder="final-table-01"></label>
-            <label class="field"><span>Seat one</span><select id="player-one" name="playerOne" required><option value="">Loading agents...</option></select></label>
-            <label class="field"><span>Seat two</span><select id="player-two" name="playerTwo" required><option value="">Loading agents...</option></select></label>
+            <label class="field"><span>Seat one</span><select id="player-one" name="playerOne" required><option value="">Waiting for agents...</option></select></label>
+            <label class="field"><span>Seat two</span><select id="player-two" name="playerTwo" required><option value="">Waiting for agents...</option></select></label>
             <label class="field dice-field"><span>Dice each</span><input id="dice-count" name="dicePerPlayer" type="number" min="1" max="20" value="5" required></label>
             <fieldset class="rule-set">
               <legend>House rules</legend>
@@ -58,10 +58,8 @@
             <p class="form-status" id="form-status" role="status" aria-live="polite"></p>
           </form>
           <section class="credentials" id="credentials" hidden aria-labelledby="credentials-title">
-            <div class="credential-head"><h3 id="credentials-title">Agent credentials</h3><span>Shown once</span></div>
-            <p>Start one bridge for each selected agent using this endpoint and token.</p>
-            <dl><div><dt>Endpoint</dt><dd id="agent-endpoint"></dd></div><div><dt>Tokens</dt><dd id="match-token"></dd></div></dl>
-            <pre id="agent-commands"></pre>
+            <div class="credential-head"><h3 id="credentials-title">Assignments sent</h3><span>Automatic</span></div>
+            <p id="assignment-message">Both agents received their private match assignment over the registration channel.</p>
           </section>
         </aside>
       </div>

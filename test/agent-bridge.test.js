@@ -8,9 +8,11 @@ const wait = () => new Promise((resolve) => setTimeout(resolve, 0));
 class FakeWebSocket extends EventEmitter {
   static OPEN = 1;
 
-  constructor(url) {
+  constructor(url, protocols, options) {
     super();
     this.url = url;
+    this.protocols = protocols;
+    this.options = options;
     this.readyState = 0;
     this.sent = [];
     queueMicrotask(() => { this.readyState = FakeWebSocket.OPEN; this.emit("open"); });
@@ -56,6 +58,18 @@ test("async bridge uses the wire sequence and canonical move envelope", async ()
   assert.deepEqual(context.dice, [2, 6]);
   assert.deepEqual(bridge.socket.sent, [{ match_id: "bridge", your_turn_seq: 4, tokens: 7,
     move: { action: "bid", turn: 4, bid: { quantity: 1, face: 2 } } }]);
+  await bridge.close();
+});
+
+test("async bridge can keep credentials out of the match URL", async () => {
+  const bridge = new AsyncAgentBridge({
+    url: "wss://dice.example/agent/private", player: "a", token: "seat-secret", tokenInUrl: false,
+    WebSocketImpl: FakeWebSocket, agent: () => ({ action: "challenge", turn: 0 }),
+  });
+  await bridge.start();
+  assert.equal(new URL(bridge.socket.url).searchParams.get("token"), null);
+  assert.equal(new URL(bridge.socket.url).searchParams.get("player"), "a");
+  assert.equal(bridge.socket.options.headers.authorization, "Bearer seat-secret");
   await bridge.close();
 });
 

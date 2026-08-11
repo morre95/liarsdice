@@ -121,13 +121,19 @@ async function loadLobby() {
     if (!matches.length) {
       const empty = document.createElement("div"); empty.className = "empty-table"; empty.innerHTML = "<span aria-hidden=\"true\">□</span><p>No tables yet. Create the opening match.</p>"; list.append(empty);
     } else matches.forEach((match, index) => list.append(matchCard(match, index)));
+    const available = agents.filter((agent) => agent.status === "available");
     for (const select of [$("player-one"), $("player-two")]) {
       const current = select.value; select.replaceChildren();
-      for (const agent of agents) { const option = document.createElement("option"); option.value = agent.id; text(option, agent.label); select.append(option); }
-      if (agents.some((agent) => agent.id === current)) select.value = current;
+      if (!agents.length) { const option = document.createElement("option"); option.value = ""; text(option, "No agents registered"); select.append(option); }
+      for (const agent of agents) {
+        const option = document.createElement("option"); option.value = agent.id; option.disabled = agent.status !== "available";
+        text(option, `${agent.label} · ${agent.status}`); select.append(option);
+      }
+      if (available.some((agent) => agent.id === current)) select.value = current;
+      else select.value = available[0]?.id || "";
     }
-    if (agents.length > 1 && !$("player-two").value) $("player-two").value = agents[1].id;
-    else if (agents.length > 1 && $("player-one").value === $("player-two").value) $("player-two").value = agents[1].id;
+    if (available.length > 1 && $("player-one").value === $("player-two").value) $("player-two").value = available[1].id;
+    $("match-form").querySelector("button[type=submit]").disabled = available.length < 2;
   } catch (error) {
     const list = $("match-list"); list.replaceChildren(); const empty = document.createElement("div"); empty.className = "empty-table"; const message = document.createElement("p"); text(message, error.message); empty.append(message); list.append(empty);
   }
@@ -159,13 +165,11 @@ async function createMatch(event) {
       exactCall: form.elements.exactCall.checked, palifico: form.elements.palifico.checked, spotOnReward: form.elements.spotOnReward.checked,
     }) });
     const result = await response.json(); if (!response.ok) throw new Error(result.error || "Could not create match");
-    status.className = "form-status success"; text(status, "Match created. Waiting for both agents.");
-    const endpoint = `${location.origin}${result.connection.endpoint}`; text($("agent-endpoint"), endpoint);
-    text($("match-token"), "One seat-bound token per agent; see commands below.");
-    text($("agent-commands"), result.connection.credentials.map(({ player, token }) => `PLAYER=${player} MATCH_TOKEN=${token} REFEREE_URL=${endpoint} MODEL_MODULE=./agents/my-model.js npm run agent`).join("\n\n"));
+    status.className = "form-status success"; text(status, "Match created. Assignments sent to both agents.");
+    text($("assignment-message"), `${players[0]} and ${players[1]} received private assignments for ${result.match.id}.`);
     $("credentials").hidden = false; $("match-id").value = ""; await loadLobby();
   } catch (error) { status.className = "form-status error"; text(status, error.message); }
-  finally { button.disabled = false; }
+  finally { button.disabled = !$("player-one").value || !$("player-two").value || $("player-one").value === $("player-two").value; }
 }
 
 function initialize() {

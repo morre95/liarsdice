@@ -17,13 +17,13 @@ The complete test suite is run by `npm test`. The JSON Schema for serializable c
 
 ## Commands
 
-Start the lobby, referee, and spectator site with `npm run server` (or `npm start`). The standalone server reads `HOST`, `PORT`, `ADMIN_TOKEN`, and `AGENTS` from the environment. `PLAYERS` remains a fallback alias for `AGENTS`.
+Start the lobby, referee, and spectator site with `npm run server` (or `npm start`). The standalone server reads `HOST`, `PORT`, `ADMIN_TOKEN`, and `AGENT_REGISTRATION_TOKEN` from the environment.
 
 ```sh
-ADMIN_TOKEN=local-admin-secret AGENTS=model-a,model-b,model-c npm start
+ADMIN_TOKEN=local-admin-secret AGENT_REGISTRATION_TOKEN=local-agent-secret npm start
 ```
 
-Open `http://127.0.0.1:8080/`, enter the admin token, and create a match. Public clients can list and spectate matches, but creating or deleting one requires the admin token. Each match gets an independent coordinator, a pair of selected agent IDs, and one generated credential per seat.
+Agents register their own IDs over an authenticated WebSocket and appear automatically in the admin panel. Open `http://127.0.0.1:8080/`, enter the admin token, and select two available registered agents. Public clients can list and spectate matches, but creating or deleting one requires the admin token.
 
 Run a deterministic headless heuristic series:
 
@@ -103,21 +103,26 @@ export default async function model({ systemPrompt, context }) {
 
 Keep provider-specific SDK calls and API keys in this adapter. The referee and bridge do not need the provider credential.
 
-After creating a match in the admin panel, connect both selected model agents in two terminals using their generated seat tokens and the match endpoint:
+Run each model agent as a persistent registered process. Every agent chooses its own ID and optional display label:
 
 ```sh
-PLAYER=model-a MATCH_TOKEN=generated-token-a REFEREE_URL=ws://127.0.0.1:8080/agent/game-1 MODEL_MODULE=./agents/my-model.js npm run agent
-PLAYER=model-b MATCH_TOKEN=generated-token-b REFEREE_URL=ws://127.0.0.1:8080/agent/game-1 MODEL_MODULE=./agents/my-model.js npm run agent
+AGENT_ID=model-a AGENT_LABEL="Model A" AGENT_REGISTRATION_TOKEN=local-agent-secret \
+  LOBBY_URL=http://127.0.0.1:8080 MODEL_MODULE=./agents/my-model.js npm run agent
+
+AGENT_ID=model-b AGENT_LABEL="Model B" AGENT_REGISTRATION_TOKEN=local-agent-secret \
+  LOBBY_URL=http://127.0.0.1:8080 MODEL_MODULE=./agents/my-model.js npm run agent
 ```
 
-The CLI defaults to `ws://127.0.0.1:8080/agent`. Use `REFEREE_URL`, or command-line flags when connecting elsewhere:
+The process remains registered across matches. When an admin selects it, the lobby sends a private seat token and endpoint over the registration channel; the runner starts an `AsyncAgentBridge` automatically and becomes available again after the match. Run `npm run agent -- --help` for registered and direct connection options.
+
+Direct match connections remain available for programmatic single-match servers:
 
 ```sh
 MATCH_TOKEN=replace-with-a-secret npm run agent -- --url wss://game.example/agent/game-1 \
   --player model-a --model ./agents/my-model.js
 ```
 
-Prefer `MATCH_TOKEN` because passing `--token` can expose the seat credential through shell history and process listings.
+Prefer environment variables because command-line tokens can be exposed through shell history and process listings.
 
 Use the bridge directly when the agent is already constructed:
 
@@ -137,7 +142,7 @@ const bridge = await connectAgentBridge({
 await bridge.waitForClose();
 ```
 
-Run `npm run agent -- --help` for all CLI options. A model failure or malformed response is submitted as an intentionally illegal move so the referee's normal retry and penalty policy remains authoritative.
+A model failure or malformed response is submitted as an intentionally illegal move so the referee's normal retry and penalty policy remains authoritative.
 
 ## Deploy To Railway From GitHub
 
@@ -148,10 +153,10 @@ Add these service variables in Railway's **Variables** tab:
 ```dotenv
 HOST=0.0.0.0
 ADMIN_TOKEN=replace-with-a-long-random-secret
-AGENTS=model-a,model-b,model-c
+AGENT_REGISTRATION_TOKEN=replace-with-a-different-long-random-secret
 ```
 
-Do not set `PORT`; Railway provides it automatically. `HOST=0.0.0.0` is required so Railway's public proxy can reach the server. `AGENTS` is the comma-separated catalog shown in the match setup panel; configure at least two unique agent IDs. `ADMIN_TOKEN` protects match creation and deletion.
+Do not set `PORT`; Railway provides it automatically. `HOST=0.0.0.0` is required so Railway's public proxy can reach the server. `ADMIN_TOKEN` protects match administration. `AGENT_REGISTRATION_TOKEN` authenticates trusted agent deployments and must be different from the admin token.
 
 After the deployment succeeds, open **Settings**, find **Networking -> Public Networking**, and select **Generate Domain**. The lobby is then available at:
 
@@ -159,16 +164,17 @@ After the deployment succeeds, open **Settings**, find **Networking -> Public Ne
 https://YOUR-SERVICE.up.railway.app/
 ```
 
-Enter `ADMIN_TOKEN` in the admin panel, select two configured agents, and create a match. The panel displays the generated seat credentials and match-specific endpoint once. Start one bridge for each selected agent using its credential, for example:
+Deploy each agent as another Railway service from this repository with the start command `npm run agent`. Configure each service with its own identity and model settings:
 
-```sh
-MATCH_TOKEN='generated-token-for-model-a' npm run agent -- \
-  --url wss://YOUR-SERVICE.up.railway.app/agent/game-1 \
-  --player model-a \
-  --model ./agents/my-model.js
+```dotenv
+AGENT_ID=model-a
+AGENT_LABEL=Model A
+AGENT_REGISTRATION_TOKEN=the-same-registration-secret-as-the-lobby
+LOBBY_URL=https://YOUR-SERVICE.up.railway.app
+MODEL_MODULE=./agents/my-model.js
 ```
 
-The match remains in `waiting` until both agents connect, then starts automatically. The Railway service runs the lobby, referees, and spectator site; it does not automatically launch model agents. Keep the service at one replica because match state is held in memory. Deployments and restarts reset all matches. Pushes to the connected `main` branch trigger automatic deployments.
+Add provider credentials such as `MODEL_API_KEY` to the agent service, not the lobby. Repeat with a different `AGENT_ID` for every agent. Once at least two agents show as `available` in the lobby, create a match; both receive their assignments and connect automatically. Keep the lobby service at one replica because match and registration state is held in memory. Deployments and restarts reset all matches, while persistent agent runners reconnect after the lobby returns.
 
 ## Live Spectator
 
@@ -176,8 +182,8 @@ Open `http://HOST:PORT/` while the server is running to browse the lobby. Select
 
 ## Security And Privacy
 
-Use a high-entropy `ADMIN_TOKEN` and bind `host` narrowly when running outside a private network. The lobby generates high-entropy seat tokens. Agent URLs contain a seat token, so do not share them or log them. Normal spectator events hide dice and reasoning; event logs contain private dice and optional reasoning and must be access-controlled. JSONL logs are append-only and can be replayed, so treat them as sensitive match records. This server does not provide identity management or persistent token storage; use Railway HTTPS or another suitably configured TLS/authentication proxy for untrusted networks.
+Use separate high-entropy `ADMIN_TOKEN` and `AGENT_REGISTRATION_TOKEN` values. Anyone with the registration token is trusted to choose an agent ID, so distribute it only to agent services you control. Match seat tokens are generated per assignment, never returned to the admin browser, and sent by registered runners in an authorization header. Legacy direct clients can still put match tokens in the WebSocket query string, which may appear in proxy logs. Normal spectator events hide dice and reasoning; event logs contain private dice and optional reasoning and must be access-controlled. This server does not provide persistent token or match storage; use Railway HTTPS or another suitably configured TLS/authentication proxy for untrusted networks.
 
 ## API Notes
 
-`createLobbyServer` and `createRefereeServer` are exported from `src/server.js`; `runMatch` and `runSeries` are exported from `src/series.js`; `AsyncAgentBridge` and `connectAgentBridge` are exported from `src/agent-bridge.js`; `LlmAgent` is exported from `src/llm-agent.js`; `HeuristicAgent` is exported from `src/heuristic-agent.js`; `readReplay`, `ReplayStream`, and `streamReplay` are exported from `src/replay.js`. Function options such as `eventLog`, `rng`, `now`, `countTokens`, and `onReplayMalformed` are programmatic hooks and are intentionally not JSON configuration fields. Variant configuration is represented by `exactCall`, `palifico`, and `spotOnReward` in `config.schema.json`.
+`createLobbyServer` and `createRefereeServer` are exported from `src/server.js`; `RegisteredAgentRunner` is exported from `src/registered-agent.js`; `runMatch` and `runSeries` are exported from `src/series.js`; `AsyncAgentBridge` and `connectAgentBridge` are exported from `src/agent-bridge.js`; `LlmAgent` is exported from `src/llm-agent.js`; `HeuristicAgent` is exported from `src/heuristic-agent.js`; `readReplay`, `ReplayStream`, and `streamReplay` are exported from `src/replay.js`. Function options such as `eventLog`, `rng`, `now`, `countTokens`, and `onReplayMalformed` are programmatic hooks and are intentionally not JSON configuration fields. Variant configuration is represented by `exactCall`, `palifico`, and `spotOnReward` in `config.schema.json`.

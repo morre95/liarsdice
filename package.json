@@ -8,6 +8,7 @@
     "server": "node src/server.js",
     "start": "npm run server",
     "agent": "node src/agent-cli.js",
+    "agent:register": "node src/agent-cli.js --lobby http://127.0.0.1:8080",
     "series": "node src/series-cli.js",
     "replay": "node src/replay.js"
   },

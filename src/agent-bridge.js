@@ -8,7 +8,7 @@ function agentMove(agent, context) {
   throw new TypeError("agent must be a function or expose move/chooseMove");
 }
 
-function endpointUrl(url, player, token) {
+function endpointUrl(url, player, token, tokenInUrl = true) {
   const endpoint = new URL(url);
   if (endpoint.protocol === "http:") endpoint.protocol = "ws:";
   if (endpoint.protocol === "https:") endpoint.protocol = "wss:";
@@ -17,7 +17,7 @@ function endpointUrl(url, player, token) {
   }
   if (endpoint.pathname === "/") endpoint.pathname = "/agent";
   endpoint.searchParams.set("player", player);
-  endpoint.searchParams.set("token", token);
+  if (tokenInUrl) endpoint.searchParams.set("token", token);
   return endpoint.href;
 }
 
@@ -41,7 +41,7 @@ function safeIllegalMove(turn) {
 
 export class AsyncAgentBridge {
   constructor({ url, player, token, agent, WebSocketImpl = WebSocket, onMessage, onError,
-    closeOnMatchEnd = true } = {}) {
+    closeOnMatchEnd = true, tokenInUrl = true } = {}) {
     if (typeof url !== "string" || !url) throw new TypeError("agent URL is required");
     if (player === undefined || player === null || String(player) === "") throw new TypeError("player is required");
     if (typeof token !== "string" || !token) throw new TypeError("match token is required");
@@ -52,7 +52,8 @@ export class AsyncAgentBridge {
     if (onMessage !== undefined && typeof onMessage !== "function") throw new TypeError("onMessage must be a function");
     if (onError !== undefined && typeof onError !== "function") throw new TypeError("onError must be a function");
 
-    this.url = endpointUrl(url, String(player), token);
+    this.url = endpointUrl(url, String(player), token, tokenInUrl);
+    this.socketOptions = tokenInUrl ? null : { headers: { authorization: `Bearer ${token}` } };
     this.player = String(player);
     this.agent = agent;
     this.WebSocketImpl = WebSocketImpl;
@@ -79,7 +80,8 @@ export class AsyncAgentBridge {
   async start() {
     if (this.started) throw new Error("bridge has already started");
     this.started = true;
-    const socket = new this.WebSocketImpl(this.url);
+    const socket = this.socketOptions
+      ? new this.WebSocketImpl(this.url, [], this.socketOptions) : new this.WebSocketImpl(this.url);
     this.socket = socket;
 
     socket.on("message", (data) => {

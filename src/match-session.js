@@ -43,6 +43,8 @@ export class MatchSession {
     this.replayStrict = options.replayStrict === true;
     this.replaySpeed = options.replaySpeed ?? 1;
     this.onReplayMalformed = options.onReplayMalformed;
+    this.onFinish = options.onFinish;
+    this.onDispose = options.onDispose;
     this.playerTokens = options.playerTokens
       ? new Map(Object.entries(options.playerTokens).map(([id, token]) => [String(id), token])) : null;
     this.match = new MatchCoordinator({ ...this.config, eventLog: this.config.eventLogPath ? { append: (event) => {
@@ -208,6 +210,7 @@ export class MatchSession {
       this.status = "finished";
       this.endedAt = new Date().toISOString();
       this.finalRecord = record;
+      this.onFinish?.(this);
     }
   }
 
@@ -316,5 +319,6 @@ export class MatchSession {
     this.agents.clear();
     this.spectators.clear();
     this.replayStreams.clear();
+    this.onDispose?.(this);
   }
 }

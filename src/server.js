@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { extname, join } from "node:path";
-import { WebSocketServer } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import { MatchSession } from "./match-session.js";
 
 const contentTypes = { ".css": "text/css; charset=utf-8", ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8" };
@@ -36,19 +36,6 @@ async function readJson(request, maxBytes = 16 * 1024) {
   catch { throw Object.assign(new Error("request body must be valid JSON"), { status: 400 }); }
 }
 
-function normalizeAgents(agents) {
-  if (!Array.isArray(agents) || agents.length < 2) throw new TypeError("at least two agents are required");
-  const normalized = agents.map((agent) => {
-    if (typeof agent === "string") return { id: agent, label: agent };
-    return { id: String(agent?.id ?? ""), label: String(agent?.label ?? agent?.id ?? "") };
-  });
-  if (normalized.some((agent) => !agent.id || !matchIdPattern.test(agent.id)) ||
-      new Set(normalized.map((agent) => agent.id)).size !== normalized.length) {
-    throw new TypeError("agents require unique URL-safe ids");
-  }
-  return normalized;
-}
-
 function matchRequest(body, catalog, defaults, token) {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw Object.assign(new Error("match must be an object"), { status: 400 });
   const allowed = new Set(["matchId", "players", "dicePerPlayer", "seed", "exactCall", "palifico", "spotOnReward"]);
@@ -58,7 +45,7 @@ function matchRequest(body, catalog, defaults, token) {
   }
   if (!Array.isArray(body.players) || body.players.length !== 2 || new Set(body.players).size !== 2 ||
       body.players.some((player) => typeof player !== "string" || !catalog.some((agent) => agent.id === player))) {
-    throw Object.assign(new Error("players must contain two distinct configured agent ids"), { status: 400 });
+    throw Object.assign(new Error("players must contain two distinct registered agent ids"), { status: 400 });
   }
   const dicePerPlayer = body.dicePerPlayer ?? defaults.dicePerPlayer ?? 5;
   if (!Number.isInteger(dicePerPlayer) || dicePerPlayer < 1 || dicePerPlayer > 20) {
@@ -81,15 +68,15 @@ function decodeRouteId(value) {
   try { return decodeURIComponent(value); } catch { return null; }
 }
 
-function createApplicationServer({ host, port, publicDir, sessions, agentCatalog, adminToken,
-  createMatch, legacyMatchId = null, maxPayload } = {}) {
+function createApplicationServer({ host, port, publicDir, sessions, getAgentCatalog, adminToken,
+  createMatch, connectRegistration, closeRegistrations, legacyMatchId = null, maxPayload } = {}) {
   let timer = null;
   let stopped = false;
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost");
     try {
       if (request.method === "GET" && url.pathname === "/api/agents") {
-        sendJson(response, 200, { agents: agentCatalog }); return;
+        sendJson(response, 200, { agents: getAgentCatalog() }); return;
       }
       if (request.method === "GET" && url.pathname === "/api/matches") {
         sendJson(response, 200, { matches: [...sessions.values()].map((session) => session.summary()) }); return;
@@ -131,6 +118,13 @@ function createApplicationServer({ host, port, publicDir, sessions, agentCatalog
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
+    if (url.pathname === "/register" && connectRegistration) {
+      wss.handleUpgrade(request, socket, head, (webSocket) => {
+        webSocket.on("error", () => { /* Protocol errors close only the offending connection. */ });
+        connectRegistration(webSocket);
+      });
+      return;
+    }
     const spectatorRoute = url.pathname.match(/^\/spectate\/([^/]+)$/);
     const agentRoute = url.pathname.match(/^\/agent\/([^/]+)$/);
     const routeId = spectatorRoute ? decodeRouteId(spectatorRoute[1]) : agentRoute ? decodeRouteId(agentRoute[1]) :
@@ -140,7 +134,11 @@ function createApplicationServer({ host, port, publicDir, sessions, agentCatalog
     wss.handleUpgrade(request, socket, head, (webSocket) => {
       webSocket.on("error", () => { /* Protocol errors close only the offending connection. */ });
       if (spectatorRoute) session.connectSpectator(webSocket);
-      else session.connectAgent(webSocket, url.searchParams.get("player"), url.searchParams.get("token"));
+      else {
+        const authorization = request.headers.authorization || "";
+        const bearerToken = authorization.startsWith("Bearer ") ? authorization.slice(7) : null;
+        session.connectAgent(webSocket, url.searchParams.get("player"), bearerToken || url.searchParams.get("token"));
+      }
     });
   });
 
@@ -156,6 +154,7 @@ function createApplicationServer({ host, port, publicDir, sessions, agentCatalog
       stopped = true;
       if (timer) clearInterval(timer);
       for (const session of sessions.values()) session.dispose();
+      closeRegistrations?.();
       wss.close();
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     },
@@ -170,51 +169,165 @@ export function createRefereeServer(options = {}) {
     port: session.config.port,
     publicDir: options.publicDir || join(process.cwd(), "public"),
     sessions,
-    agentCatalog: session.config.players.map((id) => ({ id: String(id), label: String(id) })),
+    getAgentCatalog: () => session.config.players.map((id) => ({ id: String(id), label: String(id), status: "available" })),
     legacyMatchId: session.id,
   });
   return { ...application, match: session.match };
 }
 
 export function createLobbyServer({ host = "127.0.0.1", port = 0, publicDir = join(process.cwd(), "public"),
-  agents = ["a", "b"], adminToken, matchDefaults = {} } = {}) {
+  adminToken, agentRegistrationToken, assignmentTimeoutMs = 10000, matchDefaults = {} } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new TypeError("port must be an integer from 0 to 65535");
+  if (!Number.isInteger(assignmentTimeoutMs) || assignmentTimeoutMs < 1) throw new TypeError("assignment timeout must be positive");
   if (matchDefaults.eventLogPath || matchDefaults.eventLog) {
     throw new TypeError("lobby matchDefaults cannot share an event log; configure per-match storage separately");
   }
-  const agentCatalog = normalizeAgents(agents);
   const sessions = new Map();
+  const registrations = new Map();
+  const assignmentTimers = new Map();
   let application;
+  const getAgentCatalog = () => [...registrations.values()].map(({ id, label, status, matchId, connectedAt }) => ({
+    id, label, status, match_id: matchId, connected_at: connectedAt,
+  })).sort((left, right) => left.label.localeCompare(right.label));
+  const sendRegistration = (registration, message) => {
+    if (registration.socket.readyState === WebSocket.OPEN) registration.socket.send(JSON.stringify(message));
+  };
+  const clearAssignmentTimer = (registrationOrId) => {
+    const id = typeof registrationOrId === "string" ? registrationOrId : registrationOrId.id;
+    clearTimeout(assignmentTimers.get(id));
+    assignmentTimers.delete(id);
+  };
+  const releaseMatch = (session) => {
+    for (const player of session.config.players.map(String)) {
+      clearAssignmentTimer(player);
+      const registration = registrations.get(player);
+      if (!registration || registration.matchId !== session.id) continue;
+      clearAssignmentTimer(registration);
+      registration.status = "releasing";
+      sendRegistration(registration, { type: "assignment_released", match_id: session.id });
+    }
+  };
+  const cancelFailedAssignment = (registration) => {
+    const session = registration.matchId && sessions.get(registration.matchId);
+    clearAssignmentTimer(registration);
+    registration.status = "error";
+    if (session && session.status !== "finished") {
+      session.dispose();
+      sessions.delete(session.id);
+    }
+  };
+  const assign = (registration, session) => {
+    clearAssignmentTimer(registration);
+    registration.status = session.agents.get(registration.id)?.readyState === WebSocket.OPEN ? "busy" : "assigned";
+    registration.matchId = session.id;
+    if (registration.status === "busy") return;
+    sendRegistration(registration, { type: "match_assignment", match_id: session.id, player: registration.id,
+      endpoint: `/agent/${encodeURIComponent(session.id)}`, token: session.playerTokens.get(registration.id) });
+    assignmentTimers.set(registration.id, setTimeout(() => {
+      const current = registrations.get(registration.id);
+      const activeSession = sessions.get(session.id);
+      if (activeSession && (!current || (current.status === "assigned" && current.matchId === session.id))) {
+        if (current) cancelFailedAssignment(current);
+        else { activeSession.dispose(); sessions.delete(activeSession.id); }
+      }
+    }, assignmentTimeoutMs));
+  };
+  const connectRegistration = (socket) => {
+    let registration = null;
+    const timeout = setTimeout(() => socket.close(1008, "registration timed out"), 5000);
+    socket.once("message", (data) => {
+      let message;
+      try { message = JSON.parse(data.toString()); } catch { socket.close(1008, "invalid registration"); return; }
+      if (!message || message.type !== "register" || typeof message.agent_id !== "string" ||
+          !matchIdPattern.test(message.agent_id) ||
+          (message.active_match_id != null && (typeof message.active_match_id !== "string" || !matchIdPattern.test(message.active_match_id))) ||
+          !equalSecret(message.token, agentRegistrationToken)) {
+        socket.close(1008, "invalid registration"); return;
+      }
+      const existing = registrations.get(message.agent_id);
+      if (existing?.socket.readyState === WebSocket.OPEN) { socket.close(1008, "agent already registered"); return; }
+      clearTimeout(timeout);
+      const label = typeof message.label === "string" && message.label.trim()
+        ? message.label.trim().slice(0, 64) : message.agent_id;
+      registration = { id: message.agent_id, label, status: "available", matchId: null,
+        connectedAt: new Date().toISOString(), socket, lastPongAt: Date.now() };
+      registrations.set(registration.id, registration);
+      sendRegistration(registration, { type: "registered", agent_id: registration.id });
+      const reportedSession = message.active_match_id && sessions.get(message.active_match_id);
+      if (message.active_match_id) {
+        registration.matchId = message.active_match_id;
+        if (reportedSession && reportedSession.status !== "finished") registration.status = "assigned";
+        else {
+          registration.status = "releasing";
+          sendRegistration(registration, { type: "assignment_released", match_id: message.active_match_id });
+        }
+      } else {
+        const pending = [...sessions.values()].find((session) => session.status !== "finished" &&
+          session.config.players.map(String).includes(registration.id));
+        if (pending) assign(registration, pending);
+      }
+      socket.on("message", (payload) => {
+        let event;
+        try { event = JSON.parse(payload.toString()); } catch { return; }
+        if (!event || event.match_id !== registration.matchId) return;
+        if (event.type === "assignment_started") { clearAssignmentTimer(registration); registration.status = "busy"; }
+        if (event.type === "assignment_failed") cancelFailedAssignment(registration);
+        if (event.type === "assignment_complete") {
+          const session = sessions.get(event.match_id);
+          if (!session || session.status === "finished" || session.disposing) {
+            clearAssignmentTimer(registration); registration.status = "available"; registration.matchId = null;
+          }
+        }
+      });
+      socket.on("pong", () => { registration.lastPongAt = Date.now(); });
+      registration.heartbeat = setInterval(() => {
+        if (Date.now() - registration.lastPongAt > 45000) socket.terminate();
+        else if (socket.readyState === WebSocket.OPEN) socket.ping();
+      }, 30000);
+    });
+    socket.on("close", () => {
+      clearTimeout(timeout);
+      if (registration) clearInterval(registration.heartbeat);
+      if (registration && registrations.get(registration.id)?.socket === socket) registrations.delete(registration.id);
+    });
+  };
   const createMatch = (body) => {
     if (sessions.has(body?.matchId)) throw Object.assign(new Error("matchId already exists"), { status: 409 });
     const matchToken = randomBytes(24).toString("base64url");
-    const config = matchRequest(body, agentCatalog, matchDefaults, matchToken);
+    const catalog = getAgentCatalog();
+    const config = matchRequest(body, catalog, matchDefaults, matchToken);
+    if (config.players.some((player) => registrations.get(player)?.status !== "available")) {
+      throw Object.assign(new Error("selected agents must be online and available"), { status: 409 });
+    }
     const playerTokens = Object.fromEntries(config.players.map((player) => [player, randomBytes(24).toString("base64url")]));
-    const session = new MatchSession({ ...config, host, port, playerTokens }, { waitForPlayers: true });
+    const session = new MatchSession({ ...config, host, port, playerTokens,
+      onFinish: releaseMatch, onDispose: releaseMatch }, { waitForPlayers: true });
     sessions.set(session.id, session);
-    return {
-      match: session.summary(),
-      connection: { endpoint: `/agent/${encodeURIComponent(session.id)}`,
-        credentials: config.players.map((player) => ({ player, token: playerTokens[player] })) },
-    };
+    for (const player of config.players) assign(registrations.get(player), session);
+    return { match: session.summary() };
   };
-  application = createApplicationServer({ host, port, publicDir, sessions, agentCatalog, adminToken, createMatch,
-    maxPayload: 32 * 1024 });
+  application = createApplicationServer({ host, port, publicDir, sessions, getAgentCatalog, adminToken, createMatch,
+    connectRegistration, closeRegistrations: () => {
+      for (const registration of registrations.values()) registration.socket.terminate();
+      registrations.clear();
+      for (const timer of assignmentTimers.values()) clearTimeout(timer);
+      assignmentTimers.clear();
+    }, maxPayload: 32 * 1024 });
   return {
     ...application,
     sessions,
+    registrations,
     createMatch,
     getMatch(id) { return sessions.get(String(id)); },
   };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const agents = (process.env.AGENTS || process.env.PLAYERS || "a,b").split(",").map((id) => id.trim()).filter(Boolean);
   const lobby = createLobbyServer({
     host: process.env.HOST || "127.0.0.1",
     port: Number(process.env.PORT || 8080),
-    agents,
     adminToken: process.env.ADMIN_TOKEN,
+    agentRegistrationToken: process.env.AGENT_REGISTRATION_TOKEN,
   });
   await lobby.start();
 }
