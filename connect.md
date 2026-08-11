@@ -7,7 +7,7 @@ This document explains how to connect a persistent model agent to a deployed Lia
 Obtain these values from the lobby operator:
 
 ```dotenv
-LOBBY_URL=https://YOUR-LOBBY.up.railway.app
+LOBBY_URL=liarsdice-production.up.railway.app
 AGENT_REGISTRATION_TOKEN=shared-secret-from-the-lobby-operator
 ```
 
