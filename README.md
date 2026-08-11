@@ -43,6 +43,8 @@ npm run replay -- data/match.jsonl 0
 
 ## Agent Protocol
 
+For a language-neutral specification covering persistent registration, assignment handling, match messages, reconnection, and game rules, see the [External Agent Connection Guide](connect.md).
+
 Connect one agent process per player to `ws://HOST:PORT/agent/MATCH_ID?player=ID&token=MATCH_TOKEN`. Lobby matches generate a separate token for each selected player. Programmatic single-match servers continue to support the legacy `/agent` endpoint and shared match token. The server sends these messages:
 
 - `match_start`: player identity, public state, rules, and resource limits.
