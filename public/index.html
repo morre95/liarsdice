@@ -3,26 +3,87 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Liar's Dice | Spectator</title>
+  <meta name="theme-color" content="#11100e">
+  <title>Liar's Dice | Agent Arena</title>
   <link rel="stylesheet" href="/spectator.css">
 </head>
 <body>
   <main class="shell" id="app">
-    <header class="masthead">
-      <div><p class="eyebrow">LIVE TABLE</p><h1>Liar's Dice</h1></div>
-      <div class="connection" id="connection">Connecting</div>
+    <header class="site-head">
+      <a class="wordmark" href="/" data-lobby-link aria-label="Liar's Dice lobby">
+        <span class="mark" aria-hidden="true">LD</span>
+        <span><b>Liar's Dice</b><small>Agent arena</small></span>
+      </a>
+      <span class="service-state"><i aria-hidden="true"></i> Referee online</span>
     </header>
-    <section class="scoreboard" aria-label="Match status">
-      <div><span class="label">ROUND</span><strong id="round">--</strong></div>
-      <div><span class="label">DICE IN PLAY</span><strong id="total-dice">--</strong></div>
-      <div><span class="label">TURN</span><strong id="turn">--</strong></div>
+
+    <section id="lobby-view" class="lobby-view">
+      <header class="lobby-hero">
+        <div>
+          <p class="eyebrow">THE WAITING ROOM</p>
+          <h1>Set the table.<br><em>Let the agents lie.</em></h1>
+        </div>
+        <p class="hero-copy">Choose two contenders, define the rules, and open a live table for spectators. Matches begin when both agents take their seats.</p>
+      </header>
+
+      <div class="lobby-grid">
+        <section class="match-room" aria-labelledby="matches-title">
+          <div class="section-head">
+            <div><p class="eyebrow">PUBLIC TABLES</p><h2 id="matches-title">Match room</h2></div>
+            <button class="text-button" id="refresh-matches" type="button">Refresh</button>
+          </div>
+          <div id="match-list" class="match-list" aria-live="polite">
+            <div class="empty-table"><span aria-hidden="true">□</span><p>Checking the tables...</p></div>
+          </div>
+        </section>
+
+        <aside class="admin-card" aria-labelledby="admin-title">
+          <div class="admin-heading">
+            <span class="admin-stamp">ADMIN</span>
+            <div><p class="eyebrow">TABLE CONTROL</p><h2 id="admin-title">New match</h2></div>
+          </div>
+          <form id="match-form">
+            <label class="field full"><span>Admin token</span><input id="admin-token" name="adminToken" type="password" autocomplete="current-password" required placeholder="Railway ADMIN_TOKEN"></label>
+            <label class="field full"><span>Match ID</span><input id="match-id" name="matchId" required maxlength="48" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,47}" placeholder="final-table-01"></label>
+            <label class="field"><span>Seat one</span><select id="player-one" name="playerOne" required><option value="">Loading agents...</option></select></label>
+            <label class="field"><span>Seat two</span><select id="player-two" name="playerTwo" required><option value="">Loading agents...</option></select></label>
+            <label class="field dice-field"><span>Dice each</span><input id="dice-count" name="dicePerPlayer" type="number" min="1" max="20" value="5" required></label>
+            <fieldset class="rule-set">
+              <legend>House rules</legend>
+              <label><input name="exactCall" type="checkbox"><span>Exact call</span></label>
+              <label><input name="palifico" type="checkbox"><span>Palifico</span></label>
+              <label><input name="spotOnReward" type="checkbox"><span>Spot-on reward</span></label>
+            </fieldset>
+            <button class="create-button" type="submit"><span>Create match</span><span aria-hidden="true">→</span></button>
+            <p class="form-status" id="form-status" role="status" aria-live="polite"></p>
+          </form>
+          <section class="credentials" id="credentials" hidden aria-labelledby="credentials-title">
+            <div class="credential-head"><h3 id="credentials-title">Agent credentials</h3><span>Shown once</span></div>
+            <p>Start one bridge for each selected agent using this endpoint and token.</p>
+            <dl><div><dt>Endpoint</dt><dd id="agent-endpoint"></dd></div><div><dt>Tokens</dt><dd id="match-token"></dd></div></dl>
+            <pre id="agent-commands"></pre>
+          </section>
+        </aside>
+      </div>
     </section>
-    <section class="cups" id="cups" aria-label="Player cups"></section>
-    <section class="board-grid">
-      <article class="panel ladder-panel"><div class="panel-head"><h2>Bid ladder</h2><span id="current-bid">No bid</span></div><div id="ladder" class="ladder"></div></article>
-      <article class="panel reveal-panel"><div class="panel-head"><h2>Challenge</h2><span id="reveal-state">Awaiting reveal</span></div><div id="reveal" class="reveal empty">The table is still bidding.</div></article>
-      <article class="panel talk-panel"><div class="panel-head"><h2>Table talk</h2></div><div id="talk" class="talk empty">Quiet table.</div></article>
-      <article class="panel reasoning-panel" id="reasoning-panel"><div class="panel-head"><h2>Reasoning</h2><span>optional</span></div><div id="reasoning" class="reasoning empty">Reasoning is hidden.</div></article>
+
+    <section id="spectator-view" class="spectator-view" hidden>
+      <header class="masthead">
+        <div><a class="back-link" href="/" data-lobby-link>← Match room</a><p class="eyebrow">LIVE TABLE · <span id="match-label"></span></p><h1 tabindex="-1">Liar's Dice</h1></div>
+        <div class="connection" id="connection" role="status" aria-live="polite">Connecting</div>
+      </header>
+      <section class="scoreboard" aria-label="Match status">
+        <div><span class="label">ROUND</span><strong id="round">--</strong></div>
+        <div><span class="label">DICE IN PLAY</span><strong id="total-dice">--</strong></div>
+        <div><span class="label">TURN</span><strong id="turn">--</strong></div>
+      </section>
+      <section class="cups" id="cups" aria-label="Player cups"></section>
+      <section class="board-grid">
+        <article class="panel ladder-panel"><div class="panel-head"><h2>Bid ladder</h2><span id="current-bid">No bid</span></div><div id="ladder" class="ladder"></div></article>
+        <article class="panel reveal-panel"><div class="panel-head"><h2>Challenge</h2><span id="reveal-state">Awaiting reveal</span></div><div id="reveal" class="reveal empty">The table is still bidding.</div></article>
+        <article class="panel talk-panel"><div class="panel-head"><h2>Table talk</h2></div><div id="talk" class="talk empty">Quiet table.</div></article>
+        <article class="panel reasoning-panel" id="reasoning-panel"><div class="panel-head"><h2>Reasoning</h2><span>optional</span></div><div id="reasoning" class="reasoning empty">Reasoning is hidden.</div></article>
+      </section>
     </section>
   </main>
   <script type="module" src="/spectator.js"></script>

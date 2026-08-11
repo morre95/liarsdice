@@ -231,6 +231,11 @@ export class MatchCoordinator {
     this.disconnected.set(id, at); return this.emit("disconnect", id, { graceMs: this.disconnectGraceMs });
   }
 
+  reconnect(player) {
+    const id = String(player); if (!this.players.includes(id)) throw new MoveValidationError("unknown agent", "auth");
+    this.disconnected.delete(id); this.disconnectChecked.delete(id);
+  }
+
   checkDisconnects(at = this.now()) {
     if (this.game.snapshot().phase === "finished") return null;
     const current = this.game.currentPlayer().id;

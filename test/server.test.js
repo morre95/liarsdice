@@ -43,7 +43,7 @@ test("agents authenticate and never receive the other agent's dice", async () =>
   a.close(); b.close(); await referee.stop();
 });
 
-test("spectators receive a late public snapshot and ignored inbound messages are logged", async () => {
+test("spectators receive a late public snapshot and ignored inbound messages receive a notice", async () => {
   const referee = createRefereeServer({ matchId: "late", matchToken: "secret", players: ["a", "b"], seed: 8 });
   const address = await referee.start();
   const a = await opened(`ws://127.0.0.1:${address.port}/agent?player=a&token=secret`);
