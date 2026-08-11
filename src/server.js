@@ -67,6 +67,7 @@ export function createRefereeServer(options = {}) {
   });
   const wss = new WebSocketServer({ noServer: true });
   let timer;
+  let announcedRound = match.snapshot().round;
 
   const turnInfo = (player) => {
     const deadline = config.turnDeadlineMs > 0 ? match.turnStartedAt + config.turnDeadlineMs : null;
@@ -98,6 +99,24 @@ export function createRefereeServer(options = {}) {
     } : undefined,
   });
 
+  const sendRoundStart = () => {
+    const state = match.snapshot();
+    for (const [player, socket] of agents) {
+      if (!state.players.some((candidate) => candidate.id === player)) continue;
+      send(socket, { seq: match.seq++, type: "round_start", match_id: config.matchId,
+        round: state.round, turn: match.turnSeq, dice: match.privateSnapshot(player), ...turnInfo(player) });
+    }
+  };
+
+  const sendCurrentTurn = () => {
+    const state = match.snapshot();
+    if (state.phase === "finished") return;
+    const player = state.players[state.turn]?.id;
+    const socket = agents.get(player);
+    if (socket) send(socket, { seq: match.seq++, type: "your_turn", match_id: config.matchId,
+      turn: match.turnSeq, state: visibleState(match), ...turnInfo(player) });
+  };
+
   const spectatorMessage = (event) => {
     const message = { ...event, match_id: config.matchId, private: undefined };
     if ((event.type === "challenge" || event.type === "exact") && !config.omniscientSpectators && event.result) {
@@ -126,23 +145,17 @@ export function createRefereeServer(options = {}) {
     if (event.type === "bid" && event.move?.bid) spectatorBidHistory.push({ ...event.move.bid, actor: event.actor });
     for (const [player, socket] of agents) {
       send(socket, agentMessage(player, event));
-      if (event.state?.phase !== "finished" && event.state?.players[event.state.turn]?.id === player) {
-        send(socket, agentMessage(player, event, "your_turn"));
-      }
     }
+    const newRound = (event.type === "round_end" || event.type === "penalty") &&
+      event.state?.phase !== "finished" && event.state?.round !== announcedRound;
+    if (newRound) {
+      announcedRound = event.state.round;
+      sendRoundStart();
+    }
+    if (["bid", "round_end", "illegal_move", "penalty"].includes(event.type)) sendCurrentTurn();
     for (const socket of spectators) send(socket, spectatorMessage(event));
-     if (event.type === "challenge" || event.type === "exact") spectatorBidHistory = [];
-    if (event.type === "penalty" && event.consequence.next_round !== null) {
-      const nextPlayer = match.snapshot().players[match.snapshot().turn].id;
-      const nextSocket = agents.get(nextPlayer);
-       if (nextSocket) {
-         const roundStart = { seq: match.seq++, match_id: config.matchId, type: "round_start",
-          round: match.snapshot().round, turn: match.turnSeq, dice: match.privateSnapshot(nextPlayer), ...turnInfo(nextPlayer) };
-         if (match.eventLog) match.eventLog.append(roundStart);
-         send(nextSocket, roundStart);
-       }
-    }
-    if (event.state.phase === "finished" && !matchEndEmitted) {
+    if (event.type === "challenge" || event.type === "exact") spectatorBidHistory = [];
+    if (event.state.phase === "finished" && !matchEndEmitted && event.type !== "challenge" && event.type !== "exact") {
       matchEndEmitted = true;
       const finalState = match.snapshot();
       const winner = finalState.players.length === 1 ? finalState.players[0].id :
@@ -150,10 +163,11 @@ export function createRefereeServer(options = {}) {
       const record = { seq: match.seq++, type: "match_end", match_id: config.matchId, winner,
         final_counts: Object.fromEntries(config.players.map((id) => [String(id), finalState.players.find((p) => p.id === String(id))?.diceCount || 0])),
         illegal_counts: { ...match.illegalCounts }, token_usage: { ...match.tokenUsage },
-         state: visibleState(match, config.omniscientSpectators), result: event.result || event.state.lastResult };
+        state: visibleState(match), result: event.result || event.state.lastResult };
       if (match.eventLog) match.eventLog.append(record);
       for (const socket of agents.values()) send(socket, record);
-      for (const socket of spectators) send(socket, record);
+      const spectatorRecord = config.omniscientSpectators ? { ...record, state: visibleState(match, true) } : record;
+      for (const socket of spectators) send(socket, spectatorRecord);
     }
   };
   const originalEmit = match.emit.bind(match);
@@ -256,19 +270,10 @@ export function createRefereeServer(options = {}) {
            delete copy.match_id; delete copy.your_turn_seq; delete copy.tokens;
            return copy;
          })();
-         const event = match.submit(player, { ...move, turn: payload.your_turn_seq }, { tokens });
-         if (event.type === "bid" || event.type === "challenge" || event.type === "exact") {
-          const next = match.snapshot();
-             if (next.phase !== "finished" && (event.type === "challenge" || event.type === "exact" || next.round !== event.state.round)) {
-            const nextPlayer = next.players[next.turn].id;
-            const nextSocket = agents.get(nextPlayer);
-             if (nextSocket) send(nextSocket, { seq: match.seq++, type: "round_start", match_id: config.matchId,
-               round: next.round, turn: match.turnSeq, dice: match.privateSnapshot(nextPlayer), ...turnInfo(nextPlayer) });
-          }
-        }
+          match.submit(player, { ...move, turn: payload.your_turn_seq }, { tokens });
       } catch (error) {
-        const event = error instanceof MoveValidationError ? match.illegal(player, error.code) : match.illegal(player, "malformed");
-        if (event) send(socket, agentMessage(player, event));
+        if (error instanceof MoveValidationError) match.illegal(player, error.code);
+        else match.illegal(player, "malformed");
       }
     });
   });

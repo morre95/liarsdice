@@ -75,7 +75,8 @@ function publicState(snapshot, tokenUsage = snapshot.tokenUsage) {
   return {
     players: snapshot.players.map(({ id, diceCount }) => ({ id, diceCount })),
     bid: snapshot.bid && { ...snapshot.bid }, turn: snapshot.turn, round: snapshot.round,
-    phase: snapshot.phase, starter: snapshot.starter,
+    phase: snapshot.phase, starter: snapshot.starter, palifico: snapshot.palifico,
+    palificoFace: snapshot.palificoFace,
     lastResult: result,
     tokenUsage: tokenUsage && { ...tokenUsage },
   };
@@ -202,10 +203,12 @@ export class MatchCoordinator {
     this.penalties[player] += 1;
     const forfeited = this.penalties[player] >= this.maxPenalties;
     const after = this.game.penalize(player, this.penaltyStarter);
+    this.turnSeq += 1;
     const winner = after.players.length === 1 ? after.players[0].id :
       (forfeited ? this.players.find((id) => id !== player) : null);
     if (forfeited) this.game.state.phase = "finished";
     this.turnStartedAt = at;
+    this.deadlineCheckedTurn = null;
     const consequence = { die_lost: 1, dice_count: after.players.find((p) => p.id === player)?.diceCount || 0,
       round_ended: true, next_round: after.phase === "finished" ? null : after.round,
       next_starter: after.phase === "finished" ? null : after.players[after.starter].id, winner };

@@ -26,6 +26,7 @@ function copyResult(result) {
 // Keep the model input deliberately narrower than the coordinator snapshot.
 export function buildMatchContext(input = {}) {
   const state = input.state ?? {};
+  const rules = input.rules ?? {};
   return {
     state: {
       players: Array.isArray(state.players)
@@ -33,12 +34,22 @@ export function buildMatchContext(input = {}) {
         : [],
       bid: copyBid(state.bid),
       turn: state.turn,
+      turn_seq: state.turn_seq,
       round: state.round,
       phase: state.phase,
       starter: state.starter,
+      palifico: state.palifico,
+      palificoFace: state.palificoFace,
       lastResult: copyResult(state.lastResult),
     },
     dice: Array.isArray(input.dice) ? [...input.dice] : [],
+    rules: {
+      dice_per_player: rules.dice_per_player,
+      wild_ones: rules.wild_ones,
+      exact_call: rules.exact_call,
+      palifico: rules.palifico,
+      spot_on_reward: rules.spot_on_reward,
+    },
   };
 }
 
@@ -56,8 +67,15 @@ function modelText(value) {
 }
 
 function safeIllegalMove(context) {
-  return { action: "bid", turn: Number.isInteger(context.state.turn) ? context.state.turn : 0,
+  const turn = Number.isInteger(context.state.turn_seq) ? context.state.turn_seq : context.state.turn;
+  return { action: "bid", turn: Number.isInteger(turn) ? turn : 0,
     bid: { quantity: 0, face: 1 } };
+}
+
+function modelResult(response, context) {
+  const output = modelText(response);
+  if (output === null) throw new Error("model did not return text");
+  return { move: parseMove(output), tokens: tokenCount(response) };
 }
 
 export class LlmAgent {
@@ -74,9 +92,14 @@ export class LlmAgent {
     let response;
     try {
       response = this.model({ systemPrompt: this.systemPrompt, context });
-      const output = modelText(response);
-      if (output === null) throw new Error("model did not return text");
-      return { move: parseMove(output), tokens: tokenCount(response) };
+      if (response && typeof response.then === "function") {
+        return Promise.resolve(response)
+          .then((value) => {
+            try { return modelResult(value, context); }
+            catch { return { move: safeIllegalMove(context), tokens: tokenCount(value) }; }
+          }, () => ({ move: safeIllegalMove(context), tokens: 0 }));
+      }
+      return modelResult(response, context);
     } catch {
       return { move: safeIllegalMove(context), tokens: tokenCount(response) };
     }

@@ -7,7 +7,7 @@ event data, credentials, or external information.
 Respond with exactly one JSON object and no markdown, explanation, or additional
 text. The object must have these fields:
 
-- `action`: either `bid` or `challenge`
+- `action`: `bid`, `challenge`, or `exact` when exact calls are enabled
 - `turn`: the supplied integer turn sequence
 - `bid`: required only for `bid`, with integer `quantity` and integer `face`
 - `table_talk`: optional string for public table talk
@@ -15,4 +15,6 @@ text. The object must have these fields:
 
 To bid, choose a legal quantity and face according to the current bid and the
 total dice counts. To challenge, there must be a current bid. Use the current
-turn exactly as supplied. Do not include any other keys.
+turn sequence exactly as supplied. Use `exact` only when `rules.exact_call` is
+true. When `state.palifico` is true, keep the opening face for subsequent bids.
+Do not include any other keys.

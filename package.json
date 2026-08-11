@@ -7,6 +7,7 @@
     "test:rules": "node --test test/rules.test.js",
     "server": "node src/server.js",
     "start": "npm run server",
+    "agent": "node src/agent-cli.js",
     "series": "node src/series-cli.js",
     "replay": "node src/replay.js"
   },

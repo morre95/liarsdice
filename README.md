@@ -35,13 +35,107 @@ npm run replay -- data/match.jsonl 0
 
 ## Agent Protocol
 
-Connect an agent to `ws://HOST:PORT/agent?player=ID&token=MATCH_TOKEN`. The token is the match secret, not a player secret. The server sends `match_start` and `round_start`, including only that player's dice. On the player's turn, send exactly one JSON object:
+Connect one agent process per player to `ws://HOST:PORT/agent?player=ID&token=MATCH_TOKEN`. The token is the match secret, not a player secret. The server sends these messages:
+
+- `match_start`: player identity, public state, rules, and resource limits.
+- `round_start`: the receiving player's newly rolled private dice. Every connected active player receives this before the first `your_turn` of each round.
+- `your_turn`: the public state and authoritative `your_turn_seq` for the next move.
+- `state_update`: an accepted move or other public match event.
+- `move_rejected`: a structured rejection followed by another `your_turn` when a retry is available.
+- `match_end`: winner and final public accounting.
+
+Act only on `your_turn`. Send one canonical move envelope using the supplied `match_id` and `your_turn_seq`:
 
 ```json
-{"action":"bid","turn":0,"bid":{"quantity":1,"face":2},"table_talk":"I see a pair"}
+{
+  "match_id": "game-1",
+  "your_turn_seq": 4,
+  "tokens": 120,
+  "move": {
+    "action": "bid",
+    "turn": 4,
+    "bid": {"quantity": 2, "face": 5},
+    "table_talk": "I see a pair"
+  }
+}
 ```
 
-Use `{"action":"challenge","turn":N}` to challenge. When `exactCall` is enabled, use `{"action":"exact","turn":N}` for an exact call; a correct call removes one die from every other player, and `spotOnReward` additionally returns a die to the caller. When `palifico` is enabled, a round opened by a one-die player keeps the opening bid face fixed. These three variants are disabled by default. `turn` must match the supplied turn sequence. Optional `reasoning` is retained privately and is not shown to spectators unless enabled. Invalid moves receive retries, then penalties, and eventually forfeit according to `illegalRetries` and `maxPenalties`.
+Use `{"action":"challenge","turn":N}` as the nested `move` to challenge. When `exactCall` is enabled, use `{"action":"exact","turn":N}` for an exact call; a correct call removes one die from every other player, and `spotOnReward` additionally returns a die to the caller. When `palifico` is enabled, a round opened by a one-die player keeps the opening bid face fixed; public state exposes `palifico` and `palificoFace` for the current round. These three variants are disabled by default.
+
+`state.turn` is a player seat index. It is not the move sequence. Always copy `your_turn_seq` into the envelope and move `turn`. Optional `tokens` reports non-negative integer token usage. Optional `reasoning` inside the move is retained privately and is not shown to spectators unless enabled. Invalid moves receive retries, then penalties, and eventually forfeit according to `illegalRetries` and `maxPenalties`.
+
+## Async Model Bridge
+
+`AsyncAgentBridge` in `src/agent-bridge.js` implements the WebSocket protocol for asynchronous local or cloud models. It:
+
+- Caches only the connected player's private dice.
+- Waits for current-round dice before invoking the model.
+- Supports async functions and objects exposing `move` or `chooseMove`.
+- Deduplicates repeated turn notifications while allowing legal retry notifications.
+- Uses the authoritative wire turn sequence and discards late model responses.
+- Sends the required move envelope and closes after `match_end` by default.
+
+The included CLI loads a provider adapter module. The module must default-export an async or synchronous model function accepting `{ systemPrompt, context }`. It must return JSON text, or `{ text, usage }` / `{ output, tokenUsage }`. The JSON move must include the supplied `context.state.turn_seq`:
+
+```js
+// agents/my-model.js
+export default async function model({ systemPrompt, context }) {
+  const response = await fetch(process.env.MODEL_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${process.env.MODEL_API_KEY}`,
+    },
+    body: JSON.stringify({ systemPrompt, context }),
+  });
+  if (!response.ok) throw new Error(`model request failed: ${response.status}`);
+  return response.json(); // For example: { text: "{...}", usage: { total_tokens: 120 } }
+}
+```
+
+Keep provider-specific SDK calls and API keys in this adapter. The referee and bridge do not need the provider credential.
+
+Start a match:
+
+```sh
+MATCH_ID=game-1 MATCH_TOKEN=replace-with-a-secret PLAYERS=model-a,model-b npm run server
+```
+
+In two other terminals, connect both model agents:
+
+```sh
+PLAYER=model-a MATCH_TOKEN=replace-with-a-secret MODEL_MODULE=./agents/my-model.js npm run agent
+PLAYER=model-b MATCH_TOKEN=replace-with-a-secret MODEL_MODULE=./agents/my-model.js npm run agent
+```
+
+The CLI defaults to `ws://127.0.0.1:8080/agent`. Use `REFEREE_URL`, or command-line flags when connecting elsewhere:
+
+```sh
+MATCH_TOKEN=replace-with-a-secret npm run agent -- --url wss://game.example/agent \
+  --player model-a --model ./agents/my-model.js
+```
+
+Prefer `MATCH_TOKEN` because passing `--token` can expose the shared secret through shell history and process listings.
+
+Use the bridge directly when the agent is already constructed:
+
+```js
+import { connectAgentBridge } from "./src/agent-bridge.js";
+import { LlmAgent } from "./src/llm-agent.js";
+import model from "./agents/my-model.js";
+
+const bridge = await connectAgentBridge({
+  url: "ws://127.0.0.1:8080/agent",
+  player: "model-a",
+  token: process.env.MATCH_TOKEN,
+  agent: new LlmAgent({ id: "model-a", model }),
+  onError: (error) => console.error(error.message),
+});
+
+await bridge.waitForClose();
+```
+
+Run `npm run agent -- --help` for all CLI options. A model failure or malformed response is submitted as an intentionally illegal move so the referee's normal retry and penalty policy remains authoritative.
 
 ## Live Spectator
 
@@ -53,4 +147,4 @@ Use a non-default, high-entropy `matchToken` and bind `host` narrowly when runni
 
 ## API Notes
 
-`runMatch` and `runSeries` are exported from `src/series.js`; `HeuristicAgent` is exported from `src/heuristic-agent.js`; `readReplay`, `ReplayStream`, and `streamReplay` are exported from `src/replay.js`. Function options such as `eventLog`, `rng`, `now`, `countTokens`, and `onReplayMalformed` are programmatic hooks and are intentionally not JSON configuration fields. Variant configuration is represented by `exactCall`, `palifico`, and `spotOnReward` in `config.schema.json`.
+`runMatch` and `runSeries` are exported from `src/series.js`; `AsyncAgentBridge` and `connectAgentBridge` are exported from `src/agent-bridge.js`; `LlmAgent` is exported from `src/llm-agent.js`; `HeuristicAgent` is exported from `src/heuristic-agent.js`; `readReplay`, `ReplayStream`, and `streamReplay` are exported from `src/replay.js`. Function options such as `eventLog`, `rng`, `now`, `countTokens`, and `onReplayMalformed` are programmatic hooks and are intentionally not JSON configuration fields. Variant configuration is represented by `exactCall`, `palifico`, and `spotOnReward` in `config.schema.json`.

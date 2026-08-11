@@ -75,6 +75,8 @@ test("coordinator threads exact-call variants and keeps the standard default", (
 test("coordinator enforces enabled palifico bid restriction", () => {
   const match = new MatchCoordinator({ players: ["a", "b"], dicePerPlayer: 1, palifico: true, rng: () => 5 / 6 });
   match.submit("a", bid(0, 1, 2));
+  assert.equal(match.publicSnapshot().palifico, true);
+  assert.equal(match.publicSnapshot().palificoFace, 2);
   assert.equal(match.submit("b", bid(1, 1, 3)).reason, "palifico bids must use the opening face");
 });
 
@@ -101,9 +103,11 @@ test("challenge emits a pre-roll round_end with exact matching arithmetic", () =
 test("illegal moves retry then penalise and forfeit on the third penalty", () => {
   const match = new MatchCoordinator({ players: ["a", "b"], illegalRetries: 1, maxPenalties: 3, seed: 1 });
   for (let penalty = 1; penalty <= 3; penalty += 1) {
-    assert.equal(match.submit("a", { turn: 0, action: "bid", bid: { quantity: 99, face: 2 } }).type, "illegal_move");
-    const event = match.submit("a", { turn: 0, action: "bid", bid: { quantity: 99, face: 2 } });
+    const turn = match.turnSeq;
+    assert.equal(match.submit("a", { turn, action: "bid", bid: { quantity: 99, face: 2 } }).type, "illegal_move");
+    const event = match.submit("a", { turn, action: "bid", bid: { quantity: 99, face: 2 } });
     assert.equal(event.type, penalty === 3 ? "forfeit" : "penalty");
+    assert.equal(match.turnSeq, penalty);
   }
   assert.equal(match.snapshot().phase, "finished");
   assert.equal(match.penalties.a, 3);

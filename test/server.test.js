@@ -84,7 +84,22 @@ test("round_end reveals cups only to omniscient spectators and never to the othe
   assert.deepEqual(Object.keys(ownEnd.round_end.cups), ["a"]);
   const otherEnd = messages(b).find((message) => message.type === "state_update" && message.event === "round_end");
   assert.deepEqual(Object.keys(otherEnd.round_end.cups), ["b"]);
-  assert.ok(messages(b).some((message) => message.type === "round_start" && message.round === 2));
+  const state = referee.match.snapshot();
+  const roundStarts = new Map([["a", messages(a)], ["b", messages(b)]]);
+  for (const [player, received] of roundStarts) {
+    const starts = received.filter((message) => message.type === "round_start" && message.round === 2);
+    assert.equal(starts.length, 1);
+    assert.deepEqual(starts[0].dice, referee.match.privateSnapshot(player));
+  }
+  const starter = state.players[state.turn].id;
+  const starterMessages = starter === "a" ? messages(a) : messages(b);
+  const roundStartIndex = starterMessages.findIndex((message) => message.type === "round_start" && message.round === 2);
+  const roundEndIndex = starterMessages.findIndex((message) => message.type === "state_update" && message.event === "round_end");
+  const turnIndexes = starterMessages.map((message, index) => ({ message, index }))
+    .filter(({ message }) => message.type === "your_turn" && message.your_turn_seq === 2);
+  assert.equal(turnIndexes.length, 1);
+  assert.ok(roundEndIndex < roundStartIndex);
+  assert.ok(roundStartIndex < turnIndexes[0].index);
   a.close(); b.close(); spectator.close(); await referee.stop();
 });
 
@@ -92,7 +107,7 @@ test("a terminal challenge emits one match_end to each channel and the event log
   const directory = mkdtempSync(join(tmpdir(), "liars-dice-terminal-"));
   const eventLogPath = join(directory, "events.jsonl");
   const referee = createRefereeServer({ matchId: "terminal", matchToken: "secret", players: ["a", "b"],
-    dicePerPlayer: 1, seed: 4, eventLogPath });
+    dicePerPlayer: 1, seed: 4, eventLogPath, omniscientSpectators: true });
   const address = await referee.start();
   const a = await opened(`ws://127.0.0.1:${address.port}/agent?player=a&token=secret`);
   const b = await opened(`ws://127.0.0.1:${address.port}/agent?player=b&token=secret`);
@@ -114,6 +129,11 @@ test("a terminal challenge emits one match_end to each channel and the event log
       assert.deepEqual(terminal[0].illegal_counts, { a: 0, b: 0 });
       assert.deepEqual(terminal[0].token_usage, { a: 0, b: 0 });
     }
+    for (const socket of [a, b]) {
+      assert.ok(messages(socket).find((message) => message.type === "match_end").state.players
+        .every((player) => player.dice === undefined));
+    }
+    assert.ok(messages(spectator).find((message) => message.type === "match_end").state.players[0].dice);
     const records = readFileSync(eventLogPath, "utf8").trim().split("\n").map(JSON.parse);
     const terminalRecords = records.filter((record) => record.type === "match_end");
     assert.equal(terminalRecords.length, 1);
@@ -148,10 +168,13 @@ test("agent moves require the match and your-turn sequence, with structured reje
   await wait();
   a.send(JSON.stringify({ turn: 0, action: "bid", bid: { quantity: 1, face: 2 } }));
   await wait();
-  const rejection = messages(a).at(-1);
+  const rejections = messages(a).filter((message) => message.type === "move_rejected");
+  const rejection = rejections[0];
+  assert.equal(rejections.length, 1);
   assert.equal(rejection.type, "move_rejected");
   assert.equal(rejection.reason, "shape");
   assert.equal(typeof rejection.explanation, "string");
   assert.equal(rejection.match_id, "envelope");
+  assert.equal(messages(a).at(-1).type, "your_turn");
   a.close(); await referee.stop();
 });

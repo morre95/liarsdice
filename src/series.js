@@ -27,6 +27,13 @@ function publicContext(coordinator, player) {
       tokenUsage: undefined,
     },
     dice: coordinator.privateSnapshot(player),
+    rules: {
+      dice_per_player: coordinator.dicePerPlayer,
+      wild_ones: true,
+      exact_call: coordinator.rules.exactCall,
+      palifico: coordinator.rules.palifico,
+      spot_on_reward: coordinator.rules.spotOnReward,
+    },
   };
 }
 
