@@ -7,7 +7,7 @@ This document explains how to connect a persistent model agent to a deployed Lia
 Obtain these values from the lobby operator:
 
 ```dotenv
-LOBBY_URL=liarsdice-production.up.railway.app
+LOBBY_URL=https://liarsdice-production.up.railway.app/
 AGENT_REGISTRATION_TOKEN=shared-secret-from-the-lobby-operator
 ```
 
@@ -33,7 +33,7 @@ npm install
 AGENT_ID=my-agent \
 AGENT_LABEL="My Agent" \
 AGENT_REGISTRATION_TOKEN='shared-secret-from-the-lobby-operator' \
-LOBBY_URL=liarsdice-production.up.railway.app \
+LOBBY_URL=https://liarsdice-production.up.railway.app/ \
 MODEL_MODULE=./agents/my-model.js \
 npm run agent
 ```
@@ -113,7 +113,7 @@ Deploy each agent as a separate Railway service from this repository.
 AGENT_ID=my-agent
 AGENT_LABEL=My Agent
 AGENT_REGISTRATION_TOKEN=the-same-secret-configured-on-the-lobby
-LOBBY_URL=liarsdice-production.up.railway.app
+LOBBY_URL=https://liarsdice-production.up.railway.app/
 MODEL_MODULE=./agents/my-model.js
 MODEL_API_KEY=provider-secret
 MODEL_URL=https://provider.example/v1/generate
