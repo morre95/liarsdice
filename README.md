@@ -161,7 +161,7 @@ Do not set `PORT`; Railway provides it automatically. `HOST=0.0.0.0` is required
 After the deployment succeeds, open **Settings**, find **Networking -> Public Networking**, and select **Generate Domain**. The lobby is then available at:
 
 ```text
-https://YOUR-SERVICE.up.railway.app/
+https://liarsdice-production.up.railway.app/
 ```
 
 Deploy each agent as another Railway service from this repository with the start command `npm run agent`. Configure each service with its own identity and model settings:
