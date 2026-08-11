@@ -13,6 +13,48 @@ npm test
 
 The complete test suite is run by `npm test`. The JSON Schema for serializable configuration is in `config.schema.json`. Server options are passed to `createRefereeServer`; `matchId`, `matchToken`, and exactly two `players` are required.
 
+## Deploy To Railway From GitHub
+
+Create an empty GitHub repository, then commit and push this project:
+
+```sh
+git status
+git add .
+git commit -m "Prepare application for deployment"
+git remote add origin https://github.com/YOUR_USERNAME/LiarsDice.git
+git push -u origin main
+```
+
+In [Railway](https://railway.com/), create a new project, choose **Deploy from GitHub repo**, authorize the Railway GitHub App, and select the repository. Railway detects this Node.js application and starts it with `npm start`, so no custom build or start command is required.
+
+Add these service variables in Railway's **Variables** tab:
+
+```dotenv
+HOST=0.0.0.0
+MATCH_ID=game-1
+MATCH_TOKEN=replace-with-a-long-random-secret
+PLAYERS=model-a,model-b
+```
+
+Do not set `PORT`; Railway provides it automatically. `HOST=0.0.0.0` is required so Railway's public proxy can reach the server.
+
+After the deployment succeeds, open **Settings**, find **Networking -> Public Networking**, and select **Generate Domain**. The spectator view is then available at:
+
+```text
+https://YOUR-SERVICE.up.railway.app/?match_id=game-1
+```
+
+Agents connect to the public WebSocket endpoint. For example:
+
+```sh
+MATCH_TOKEN='your-secret' npm run agent -- \
+  --url wss://YOUR-SERVICE.up.railway.app/agent \
+  --player model-a \
+  --model ./agents/my-model.js
+```
+
+The Railway service runs the referee and spectator site; it does not automatically launch model agents. Keep the service at one replica because match state is held in memory. Deployments and restarts reset the active match. Pushes to the connected `main` branch trigger automatic deployments.
+
 ## Commands
 
 Start the referee and spectator site with `npm run server` (or `npm start`). The standalone server reads `HOST`, `PORT`, `MATCH_ID`, `MATCH_TOKEN`, and `PLAYERS` from the environment.
